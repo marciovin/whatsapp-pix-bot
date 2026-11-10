@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Estado persistente da conversa (um registro por telefone).
+model Conversation {
+  phone     String   @id
+  state     String   @default("IDLE")
+  context   Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Ids de mensagens da Meta já recebidos (deduplicação de reenvios).
+model InboundMessage {
+  waMessageId String   @id
+  receivedAt  DateTime @default(now())
+}
+
+model Order {
+  id            String    @id @default(uuid())
+  orderNumber   Int       @unique @default(autoincrement())
+  customerPhone String
+  customerName  String?
+  address       String
+  items         Json
+  totalCents    Int
+  // AWAITING_PAYMENT | PAID | CANCELED | EXPIRED
+  status        String    @default("AWAITING_PAYMENT")
+  paidAt        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  payment       Payment?
+
+  @@index([customerPhone, status])
+}
+
+model Payment {
+  id           String    @id @default(uuid())
+  orderId      String    @unique
+  order        Order     @relation(fields: [orderId], references: [id])
+  provider     String    @default("ASAAS")
+  chargeId     String    @unique
+  amountCents  Int
+  // PENDING | PAID | CANCELED | EXPIRED
+  status       String    @default("PENDING")
+  pixPayload   String?
+  pixExpiresAt DateTime?
+  anomaly      String?
+  paidAt       DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+// Eventos de webhook do Asaas recebidos/processados (idempotência + auditoria).
+model PaymentEvent {
+  eventId     String    @id
+  event       String
+  chargeId    String?
+  // RECEIVED | PROCESSED
+  status      String    @default("RECEIVED")
+  note        String?
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+}
+
+// Outbox: mensagens a enviar pelo WhatsApp com retentativas.
+model Outbox {
+  id            String    @id @default(uuid())
+  kind          String
+  to            String
+  payload       Json
+  dedupeKey     String    @unique
+  // PENDING | SENDING | SENT | FAILED
+  status        String    @default("PENDING")
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lockedAt      DateTime?
+  lastError     String?
+  sentAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([status, nextAttemptAt])
+}
